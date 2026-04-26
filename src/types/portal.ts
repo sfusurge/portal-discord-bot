@@ -42,6 +42,31 @@ export const portalAnnouncementResponseSchema = z.object({
     hackathonId: z.number().int().positive(),
 });
 
+export const portalAnnouncementDeletePayloadSchema = z.object({
+    messageId: nonEmptyString,
+    channelId: nonEmptyString.optional(),
+    guildId: nonEmptyString.optional(),
+});
+
+export const portalAnnouncementDeleteResponseSchema = z.discriminatedUnion(
+    'status',
+    [
+        z.object({
+            status: z.literal('archived'),
+            id: z.number().int().positive(),
+            hackathonId: z.number().int().positive(),
+        }),
+        z.object({
+            status: z.literal('duplicate'),
+            id: z.number().int().positive(),
+            hackathonId: z.number().int().positive(),
+        }),
+        z.object({
+            status: z.literal('not_found'),
+        }),
+    ]
+);
+
 export type PortalAnnouncementAttachment = z.infer<
     typeof portalAnnouncementAttachmentSchema
 >;
@@ -52,4 +77,12 @@ export type PortalAnnouncementPayload = z.infer<
 
 export type PortalAnnouncementResponse = z.infer<
     typeof portalAnnouncementResponseSchema
+>;
+
+export type PortalAnnouncementDeletePayload = z.infer<
+    typeof portalAnnouncementDeletePayloadSchema
+>;
+
+export type PortalAnnouncementDeleteResponse = z.infer<
+    typeof portalAnnouncementDeleteResponseSchema
 >;

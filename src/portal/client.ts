@@ -1,10 +1,14 @@
-import axios, { AxiosError } from 'axios';
+import axios, { AxiosError, AxiosRequestConfig } from 'axios';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import { sleep } from '../utils/sleep.js';
 import {
+    PortalAnnouncementDeletePayload,
+    PortalAnnouncementDeleteResponse,
     PortalAnnouncementPayload,
     PortalAnnouncementResponse,
+    portalAnnouncementDeletePayloadSchema,
+    portalAnnouncementDeleteResponseSchema,
     portalAnnouncementPayloadSchema,
     portalAnnouncementResponseSchema,
 } from '../types/portal.js';
@@ -24,49 +28,49 @@ function getRetryDelayMs(attempt: number): number {
 export class PortalClient {
     constructor(private readonly dryRun = false) { }
 
-    async sendAnnouncement(
-        payload: PortalAnnouncementPayload
-    ): Promise<PortalAnnouncementResponse | null> {
-        const validatedPayload = portalAnnouncementPayloadSchema.parse(payload);
+    private async executeWithRetry<T>(options: {
+        operation: string;
+        messageId: string;
+        idempotencyKey: string;
+        dryRunLogFields: Record<string, unknown>;
+        request: () => Promise<{ data: unknown }>;
+        parse: (data: unknown) => T;
+    }): Promise<T | null> {
+        const {
+            operation,
+            messageId,
+            idempotencyKey,
+            dryRunLogFields,
+            request,
+            parse,
+        } = options;
 
         if (this.dryRun) {
             logger.info(
                 {
-                    messageId: validatedPayload.messageId,
-                    channelId: validatedPayload.channelId,
-                    idempotencyKey: validatedPayload.idempotencyKey,
+                    operation,
+                    messageId,
+                    idempotencyKey,
+                    ...dryRunLogFields,
                 },
                 'Dry run enabled: skipping portal API call'
             );
             return null;
         }
 
-        const headers = {
-            Authorization: `Bearer ${env.PORTAL_API_SECRET}`,
-            'Content-Type': 'application/json',
-            'X-Idempotency-Key': validatedPayload.idempotencyKey,
-        };
-
         const maxAttempts = env.PORTAL_MAX_RETRIES + 1;
 
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                const response = await axios.post<unknown>(
-                    env.PORTAL_API_URL,
-                    validatedPayload,
-                    {
-                        headers,
-                        timeout: env.PORTAL_API_TIMEOUT_MS,
-                    }
-                );
-
-                return portalAnnouncementResponseSchema.parse(response.data);
+                const response = await request();
+                return parse(response.data);
             } catch (error) {
                 if (!axios.isAxiosError(error)) {
                     logger.error(
                         {
                             attempt,
-                            messageId: validatedPayload.messageId,
+                            operation,
+                            messageId,
                             err: error,
                         },
                         'Portal API request failed with non-HTTP error'
@@ -82,8 +86,9 @@ export class PortalClient {
                     logger.error(
                         {
                             attempt,
+                            operation,
                             status,
-                            messageId: validatedPayload.messageId,
+                            messageId,
                             responseData: axiosError.response?.data,
                             err: error,
                         },
@@ -97,9 +102,10 @@ export class PortalClient {
                 logger.warn(
                     {
                         attempt,
+                        operation,
                         status,
                         delay,
-                        messageId: validatedPayload.messageId,
+                        messageId,
                     },
                     'Portal API request failed, retrying'
                 );
@@ -109,5 +115,66 @@ export class PortalClient {
         }
 
         return null;
+    }
+
+    async sendAnnouncement(
+        payload: PortalAnnouncementPayload
+    ): Promise<PortalAnnouncementResponse | null> {
+        const validatedPayload = portalAnnouncementPayloadSchema.parse(payload);
+
+        const config: AxiosRequestConfig = {
+            method: 'POST',
+            url: env.PORTAL_API_URL,
+            data: validatedPayload,
+            headers: {
+                Authorization: `Bearer ${env.PORTAL_API_SECRET}`,
+                'Content-Type': 'application/json',
+                'X-Idempotency-Key': validatedPayload.idempotencyKey,
+            },
+            timeout: env.PORTAL_API_TIMEOUT_MS,
+        };
+
+        return this.executeWithRetry({
+            operation: 'announcement_upsert',
+            messageId: validatedPayload.messageId,
+            idempotencyKey: validatedPayload.idempotencyKey,
+            dryRunLogFields: {
+                channelId: validatedPayload.channelId,
+            },
+            request: () => axios.request<unknown>(config),
+            parse: (data) => portalAnnouncementResponseSchema.parse(data),
+        });
+    }
+
+    async deleteAnnouncement(
+        payload: PortalAnnouncementDeletePayload
+    ): Promise<PortalAnnouncementDeleteResponse | null> {
+        const validatedPayload =
+            portalAnnouncementDeletePayloadSchema.parse(payload);
+        const idempotencyKey = `delete:${validatedPayload.messageId}`;
+
+        const config: AxiosRequestConfig = {
+            method: 'DELETE',
+            url: env.PORTAL_API_URL,
+            data: validatedPayload,
+            headers: {
+                Authorization: `Bearer ${env.PORTAL_API_SECRET}`,
+                'Content-Type': 'application/json',
+                'X-Idempotency-Key': idempotencyKey,
+            },
+            timeout: env.PORTAL_API_TIMEOUT_MS,
+        };
+
+        return this.executeWithRetry({
+            operation: 'announcement_delete',
+            messageId: validatedPayload.messageId,
+            idempotencyKey,
+            dryRunLogFields: {
+                channelId: validatedPayload.channelId,
+                guildId: validatedPayload.guildId,
+            },
+            request: () => axios.request<unknown>(config),
+            parse: (data) => portalAnnouncementDeleteResponseSchema.parse(data),
+        });
     }
 }

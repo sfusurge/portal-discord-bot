@@ -211,6 +211,93 @@ export async function startWatcher(dryRun = false): Promise<Client> {
         }
     });
 
+    client.on(Events.MessageDelete, async (message) => {
+        try {
+            const channelId = message.channelId;
+            if (!channelId || !env.DISCORD_WATCH_CHANNEL_SET.has(channelId)) {
+                return;
+            }
+            const messageId = message.id;
+            if (!messageId) {
+                return;
+            }
+            const guildId = message.guildId ?? undefined;
+            const result = await portalClient.deleteAnnouncement({
+                messageId,
+                channelId,
+                guildId,
+            });
+
+            logger.info(
+                {
+                    messageId,
+                    channelId,
+                    guildId,
+                    isBulkDelete: false,
+                    resultStatus: result?.status ?? 'dry-run',
+                },
+                'Processed watched Discord message delete'
+            );
+        } catch (error) {
+            logger.error(
+                {
+                    err: error,
+                    messageId: message.id,
+                    channelId: message.channelId,
+                },
+                'Failed to process watched Discord message delete'
+            );
+        }
+    });
+
+    client.on(Events.MessageBulkDelete, async (messages, channel) => {
+        try {
+            if (
+                !env.DISCORD_WATCH_CHANNEL_SET.has(channel.id) ||
+                !SUPPORTED_CHANNEL_TYPES.has(channel.type)
+            ) {
+                return;
+            }
+
+            const channelId = channel.id;
+            const guildId = channel.guildId;
+
+            for (const msg of messages.values()) {
+                if (!msg || typeof msg === 'boolean') {
+                    continue;
+                }
+                const messageId = msg.id;
+                if (!messageId) {
+                    continue;
+                }
+                const result = await portalClient.deleteAnnouncement({
+                    messageId,
+                    channelId,
+                    guildId,
+                });
+                logger.info(
+                    {
+                        messageId,
+                        channelId,
+                        guildId,
+                        isBulkDelete: true,
+                        resultStatus: result?.status ?? 'dry-run',
+                    },
+                    'Processed watched Discord bulk message delete'
+                );
+            }
+        } catch (error) {
+            logger.error(
+                {
+                    err: error,
+                    channelId: channel.id,
+                    bulkSize: messages.size,
+                },
+                'Failed to process watched Discord message bulk delete'
+            );
+        }
+    });
+
     await client.login(env.DISCORD_BOT_TOKEN);
 
     return client;
