@@ -8,6 +8,7 @@ Discord watcher bot that listens to configured channels and forwards messages to
 - Forwards every non-bot message from those channels to the Portal API
 - Mirrors message **edits** in place via `MessageUpdate` (uses `Partials.Message` so it catches edits to messages sent before the bot started)
 - Sends each attachment's metadata (URL, filename, content type, size, dimensions) as a structured array — content text and attachments are kept separate
+- Sends structured mention metadata for users/roles/channels so the portal can render `<@...>`, `<@&...>`, and `<#...>` tokens as readable labels
 - Archives the full Discord `Message.toJSON()` payload so we can backfill later if needed
 - Archives portal rows when messages are **deleted** in Discord (`MessageDelete` and `MessageBulkDelete` → portal `DELETE`, `is_archived=true`)
 - Includes deterministic idempotency key (`message.id`) to support dedupe
@@ -62,6 +63,25 @@ Discord watcher bot that listens to configured channels and forwards messages to
       "height":      "integer | null"
     }
   ],
+  "mentions": {
+    "users": {
+      "123456789012345678": {
+        "displayName": "Cole",
+        "username": "colem"
+      }
+    },
+    "roles": {
+      "111111111111111111": {
+        "name": "Organizers"
+      }
+    },
+    "channels": {
+      "1491293599994744923": {
+        "name": "announcements",
+        "type": 0
+      }
+    }
+  },
   "rawPayload":     { /* Message.toJSON() */ },
   "idempotencyKey": "string (= messageId)"
 }

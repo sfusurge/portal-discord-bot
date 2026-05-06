@@ -12,6 +12,7 @@ import { logger } from '../config/logger.js';
 import { PortalClient } from '../portal/client.js';
 import {
     PortalAnnouncementAttachment,
+    PortalAnnouncementMentions,
     PortalAnnouncementPayload,
     portalAnnouncementPayloadSchema,
 } from '../types/portal.js';
@@ -54,12 +55,52 @@ function extractAttachments(
     }));
 }
 
+function extractMentions(message: EligibleGuildMessage): PortalAnnouncementMentions {
+    const users: PortalAnnouncementMentions['users'] = {};
+    const roles: PortalAnnouncementMentions['roles'] = {};
+    const channels: PortalAnnouncementMentions['channels'] = {};
+
+    for (const [id, user] of message.mentions.users) {
+        const member = message.mentions.members.get(id);
+        users[id] = {
+            displayName:
+                member?.displayName?.trim() ||
+                user.globalName?.trim() ||
+                user.username,
+            username: user.username,
+        };
+    }
+
+    for (const [id, role] of message.mentions.roles) {
+        roles[id] = {
+            name: role.name,
+        };
+    }
+
+    for (const [id, channel] of message.mentions.channels) {
+        if (!('name' in channel) || typeof channel.name !== 'string') {
+            continue;
+        }
+        channels[id] = {
+            name: channel.name,
+            type: channel.type,
+        };
+    }
+
+    return {
+        users,
+        roles,
+        channels,
+    };
+}
+
 function buildPayload(
     message: EligibleGuildMessage,
     options: { isEdit: boolean }
 ): PortalAnnouncementPayload {
     const content = message.content?.trim() ?? '';
     const attachments = extractAttachments(message);
+    const mentions = extractMentions(message);
 
     const editedTimestamp =
         options.isEdit && message.editedAt
@@ -75,6 +116,7 @@ function buildPayload(
         authorId: message.author.id,
         content,
         attachments,
+        mentions,
         timestamp: message.createdAt.toISOString(),
         editedTimestamp,
         rawPayload,

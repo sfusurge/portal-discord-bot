@@ -11,6 +11,26 @@ export const portalAnnouncementAttachmentSchema = z.object({
     height: z.number().int().nonnegative().nullable().optional(),
 });
 
+export const portalAnnouncementMentionUserSchema = z.object({
+    displayName: z.string().min(1),
+    username: z.string().min(1),
+});
+
+export const portalAnnouncementMentionRoleSchema = z.object({
+    name: z.string().min(1),
+});
+
+export const portalAnnouncementMentionChannelSchema = z.object({
+    name: z.string().min(1),
+    type: z.number().int(),
+});
+
+export const portalAnnouncementMentionsSchema = z.object({
+    users: z.record(nonEmptyString, portalAnnouncementMentionUserSchema),
+    roles: z.record(nonEmptyString, portalAnnouncementMentionRoleSchema),
+    channels: z.record(nonEmptyString, portalAnnouncementMentionChannelSchema),
+});
+
 export const portalAnnouncementPayloadSchema = z
     .object({
         channelId: nonEmptyString,
@@ -24,6 +44,9 @@ export const portalAnnouncementPayloadSchema = z
             .array(portalAnnouncementAttachmentSchema)
             .optional()
             .default([]),
+        mentions: portalAnnouncementMentionsSchema
+            .optional()
+            .default({ users: {}, roles: {}, channels: {} }),
         rawPayload: z.record(z.string(), z.unknown()).optional(),
         idempotencyKey: nonEmptyString,
     })
@@ -69,6 +92,10 @@ export const portalAnnouncementDeleteResponseSchema = z.discriminatedUnion(
 
 export type PortalAnnouncementAttachment = z.infer<
     typeof portalAnnouncementAttachmentSchema
+>;
+
+export type PortalAnnouncementMentions = z.infer<
+    typeof portalAnnouncementMentionsSchema
 >;
 
 export type PortalAnnouncementPayload = z.infer<
