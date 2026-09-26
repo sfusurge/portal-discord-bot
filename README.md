@@ -26,7 +26,7 @@ Discord watcher bot that listens to configured channels and forwards messages to
 ## Environment variables
 
 - `DISCORD_BOT_TOKEN`: Discord bot token
-- `DISCORD_WATCH_CHANNEL_IDS`: comma-separated channel IDs to ingest from
+- `DISCORD_WATCH_CHANNEL_IDS`: comma-separated channel IDs to ingest from. Leave empty to disable portal forwarding
 - `PORTAL_API_URL`: Portal endpoint (e.g. `https://portal.sfusurge.com/api/webhooks/discord`)
 - `PORTAL_API_SECRET`: shared bearer secret expected by Portal API
 - `PORTAL_API_TIMEOUT_MS`: request timeout in ms
@@ -34,6 +34,14 @@ Discord watcher bot that listens to configured channels and forwards messages to
 - `PORTAL_RETRY_BASE_DELAY_MS`: retry base backoff delay in ms
 - `PORTAL_RETRY_MAX_DELAY_MS`: maximum retry delay cap in ms
 - `LOG_LEVEL`: `trace|debug|info|warn|error|fatal`
+- `DISCORD_GUILD_ID`: guild where schedule commands are registered. Leave unset to run the watcher without them
+- `SCHEDULE_EXEC_CHANNEL_ID`: channel that shows every pending announcement in send-time order
+- `SCHEDULE_TIMEZONE`: IANA zone for `/sm` and `/bulk` dates (default `America/Los_Angeles`)
+- `SCHEDULE_STORE_PATH`: JSON queue file (default `data/scheduled-announcements.json`)
+
+## Schedule commands
+
+Administrator only. `/sm` schedules one message. `/em` and `/dm` edit or delete a pending message after Confirm. `/bulk` reads a `.txt` or `.md` file of `---` blocks (`date`, `time`, `channel`, then the body) and asks you to confirm before saving. The bot posts each announcement at its scheduled time. Mentions notify on that post. The exec channel board does not notify.
 
 ## Run
 

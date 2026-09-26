@@ -1,6 +1,7 @@
 import type { Client } from 'discord.js';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
+import { stopScheduling } from './discord/schedule-commands.js';
 import { startWatcher } from './discord/watcher.js';
 
 const args = process.argv.slice(2);
@@ -16,8 +17,14 @@ function registerShutdownHandlers(client: Client): void {
         isShuttingDown = true;
 
         logger.info({ signal }, 'Received shutdown signal, closing Discord client');
-        client.destroy();
-        process.exit(0);
+        void stopScheduling()
+            .catch((error: unknown) => {
+                logger.error({ err: error }, 'Failed to stop scheduling');
+            })
+            .finally(() => {
+                client.destroy();
+                process.exit(0);
+            });
     };
 
     process.once('SIGINT', () => shutdown('SIGINT'));
@@ -42,6 +49,10 @@ async function main() {
     const client = await startWatcher(false);
     registerShutdownHandlers(client);
 }
+
+process.on('unhandledRejection', (error: unknown) => {
+    logger.error({ err: error }, 'Unhandled promise rejection');
+});
 
 main().catch((error) => {
     logger.fatal({ err: error }, 'Bot crashed during startup');

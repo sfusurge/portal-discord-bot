@@ -9,6 +9,7 @@ import {
 } from 'discord.js';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
+import { startScheduling } from './schedule-commands.js';
 import { PortalClient } from '../portal/client.js';
 import {
     PortalAnnouncementAttachment,
@@ -188,7 +189,9 @@ export async function startWatcher(dryRun = false): Promise<Client> {
         intents: [
             GatewayIntentBits.Guilds,
             GatewayIntentBits.GuildMessages,
-            GatewayIntentBits.MessageContent,
+            ...(env.DISCORD_WATCH_CHANNEL_IDS.length > 0
+                ? [GatewayIntentBits.MessageContent]
+                : []),
         ],
         // Without Partials.Message, discord.js drops messageUpdate events for
         // any message not currently in the in-memory cache (e.g. edits to
@@ -206,6 +209,12 @@ export async function startWatcher(dryRun = false): Promise<Client> {
             },
             'Discord watcher is ready'
         );
+        if (env.DISCORD_WATCH_CHANNEL_IDS.length === 0) {
+            logger.info('Portal watcher is off. No channels are being forwarded.');
+        }
+        void startScheduling(readyClient).catch((error: unknown) => {
+            logger.error({ err: error }, 'Scheduling failed to start');
+        });
     });
 
     client.on(Events.Error, (error) => {
@@ -217,6 +226,9 @@ export async function startWatcher(dryRun = false): Promise<Client> {
     });
 
     client.on(Events.MessageCreate, async (message) => {
+        if (env.DISCORD_WATCH_CHANNEL_IDS.length === 0) {
+            return;
+        }
         try {
             if (!isEligibleMessage(message)) {
                 return;
@@ -235,6 +247,9 @@ export async function startWatcher(dryRun = false): Promise<Client> {
     });
 
     client.on(Events.MessageUpdate, async (_oldMessage, newMessage) => {
+        if (env.DISCORD_WATCH_CHANNEL_IDS.length === 0) {
+            return;
+        }
         try {
             const hydrated = await hydratePartial(newMessage);
             if (!hydrated || !isEligibleMessage(hydrated) || !hydrated.editedAt) {
@@ -254,6 +269,9 @@ export async function startWatcher(dryRun = false): Promise<Client> {
     });
 
     client.on(Events.MessageDelete, async (message) => {
+        if (env.DISCORD_WATCH_CHANNEL_IDS.length === 0) {
+            return;
+        }
         try {
             const channelId = message.channelId;
             if (!channelId || !env.DISCORD_WATCH_CHANNEL_SET.has(channelId)) {
@@ -293,6 +311,9 @@ export async function startWatcher(dryRun = false): Promise<Client> {
     });
 
     client.on(Events.MessageBulkDelete, async (messages, channel) => {
+        if (env.DISCORD_WATCH_CHANNEL_IDS.length === 0) {
+            return;
+        }
         try {
             if (
                 !env.DISCORD_WATCH_CHANNEL_SET.has(channel.id) ||
