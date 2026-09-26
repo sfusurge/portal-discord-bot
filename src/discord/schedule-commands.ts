@@ -11,6 +11,7 @@ import {
     Events,
     Guild,
     Interaction,
+    InteractionContextType,
     NewsChannel,
     PermissionFlagsBits,
     REST,
@@ -27,6 +28,7 @@ import {
     type BoardChange,
     deletedBoardMessage,
     formatMessageId,
+    isUnknownMessageError,
     recordEmbed,
     type AnnouncementEmbed,
 } from '../schedule/board.js';
@@ -65,7 +67,7 @@ const commandBuilders = [
         .setName('sm')
         .setDescription('Schedule an announcement')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .setDMPermission(false)
+        .setContexts(InteractionContextType.Guild)
         .addStringOption((option) =>
             option
                 .setName('date')
@@ -96,9 +98,9 @@ const commandBuilders = [
         ),
     new SlashCommandBuilder()
         .setName('em')
-        .setDescription('Edit a pending announcement')
+        .setDescription('Edit an announcement')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .setDMPermission(false)
+        .setContexts(InteractionContextType.Guild)
         .addStringOption((option) =>
             option.setName('id').setDescription('1 or msg 1').setRequired(true)
         )
@@ -124,7 +126,7 @@ const commandBuilders = [
         .setName('dm')
         .setDescription('Delete a pending announcement')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .setDMPermission(false)
+        .setContexts(InteractionContextType.Guild)
         .addStringOption((option) =>
             option.setName('id').setDescription('1 or msg 1').setRequired(true)
         ),
@@ -132,7 +134,7 @@ const commandBuilders = [
         .setName('bulk')
         .setDescription('Schedule many announcements from a text file or paste')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .setDMPermission(false)
+        .setContexts(InteractionContextType.Guild)
         .addAttachmentOption((option) =>
             option.setName('file').setDescription('UTF-8 .txt or .md document')
         )
@@ -445,7 +447,7 @@ async function beginEdit(
         return;
     }
     const data = await scheduling.store.read();
-    const found = pendingById(data, interaction.options.getString('id', true));
+    const found = announcementById(data, interaction.options.getString('id', true));
     if (typeof found === 'string') {
         await reply(interaction, found);
         return;
@@ -455,7 +457,22 @@ async function beginEdit(
     const timeOption = interaction.options.getString('time');
     const messageOption = interaction.options.getString('message');
     const channelOption = interaction.options.getChannel('channel');
-    if (!dateOption && !timeOption && !messageOption && !channelOption) {
+    if (found.status === 'sent') {
+        if (dateOption || timeOption || channelOption || messageOption === null) {
+            await reply(
+                interaction,
+                'That announcement was already posted. You can only change the message.'
+            );
+            return;
+        }
+        if (!found.sentMessageId) {
+            await reply(
+                interaction,
+                `**${formatMessageId(found.id)}** was posted, but the Discord message is gone.`
+            );
+            return;
+        }
+    } else if (!dateOption && !timeOption && !messageOption && !channelOption) {
         await reply(interaction, 'Include a date, time, channel, or message to change.');
         return;
     }
@@ -682,10 +699,46 @@ async function confirmEdit(
     }
 
     let missing = false;
+    let editError: string | null = null;
     let boardError = false;
     await scheduling.store.update(async (data) => {
         const current = data.announcements.find((item) => item.id === pending.announcementId);
-        if (!current || current.status !== 'pending') {
+        if (!current) {
+            missing = true;
+            return data;
+        }
+        if (current.status === 'sent') {
+            if (!current.sentMessageId || pending.patch.message === undefined) {
+                missing = true;
+                return data;
+            }
+            try {
+                const channel = await postableChannel(scheduling.client, current.channelId);
+                await channel.messages.edit(current.sentMessageId, {
+                    content: pending.patch.message,
+                    allowedMentions: silentMentions,
+                });
+            } catch (error) {
+                editError = isUnknownMessageError(error)
+                    ? 'That Discord message is gone, so the text was not changed.'
+                    : 'Could not edit that Discord message.';
+                logger.error({ err: error }, 'Failed to edit a posted announcement');
+                return data;
+            }
+            const next = replaceAnnouncement(data, applyPatch(current, pending.patch));
+            if (!current.boardMessageId) {
+                return next;
+            }
+            return saveBoard(
+                scheduling.ports,
+                next,
+                { type: 'refresh', messageId: current.boardMessageId },
+                (failed) => {
+                    boardError = failed;
+                }
+            );
+        }
+        if (current.status !== 'pending') {
             missing = true;
             return data;
         }
@@ -698,6 +751,10 @@ async function confirmEdit(
             }
         );
     });
+    if (editError) {
+        await updateButton(interaction, editError);
+        return;
+    }
     if (missing) {
         await updateButton(
             interaction,
@@ -860,7 +917,7 @@ function patchChanges(announcement: Announcement, patch: EditPatch): boolean {
     return false;
 }
 
-function pendingById(data: ScheduleFile, rawId: string): Announcement | string {
+function announcementById(data: ScheduleFile, rawId: string): Announcement | string {
     const id = parseAnnouncementId(rawId);
     if (id === null) {
         return 'Use an id like 1 or msg 1.';
@@ -869,8 +926,16 @@ function pendingById(data: ScheduleFile, rawId: string): Announcement | string {
     if (!found) {
         return `No announcement **${formatMessageId(id)}**.`;
     }
+    return found;
+}
+
+function pendingById(data: ScheduleFile, rawId: string): Announcement | string {
+    const found = announcementById(data, rawId);
+    if (typeof found === 'string') {
+        return found;
+    }
     if (found.status !== 'pending') {
-        return `**${formatMessageId(id)}** was already sent.`;
+        return `**${formatMessageId(found.id)}** was already sent.`;
     }
     return found;
 }

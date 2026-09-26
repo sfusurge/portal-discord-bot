@@ -204,6 +204,41 @@ describe('syncBoardPosts', () => {
         assert.deepEqual(sent, []);
     });
 
+    it('shows the new text when a posted card is refreshed', async () => {
+        const posted = announcement({
+            id: 2,
+            boardMessageId: '100',
+            message: 'Fixed copy',
+            status: 'sent',
+            scheduledAt: '2026-09-27T01:00:00.000Z',
+            sentMessageId: '555',
+            sentAt: '2026-09-27T01:00:01.000Z',
+        });
+        const pending = announcement({
+            id: 1,
+            boardMessageId: '100',
+            message: 'Stay',
+            scheduledAt: '2026-09-27T02:00:00.000Z',
+        });
+        const edited: string[][] = [];
+        await syncBoardPosts(
+            { nextId: 3, boardMessageIds: [], announcements: [posted, pending] },
+            {
+                async deleteMessage() {
+                    throw new Error('should not delete');
+                },
+                async send() {
+                    throw new Error('should not send');
+                },
+                async editMessage(_id, cards) {
+                    edited.push(cards.map((card) => card.embed.description));
+                },
+            },
+            { type: 'refresh', messageId: '100' }
+        );
+        assert.deepEqual(edited, [['Fixed copy', 'Stay']]);
+    });
+
     it('puts short announcements in one message and splits when the character budget is full', () => {
         const together = packBoardGroups([
             announcement({ id: 1, message: 'A' }),
